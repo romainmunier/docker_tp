@@ -1,0 +1,414 @@
+version: '3.8'
+services:
+    portainer:
+        container_name: Portainer
+        image: portainer/portainer-ee
+        restart: 'no'
+        volumes:
+            - portainer_data:/data
+            - /var/run/docker.sock:/var/run/docker.sock
+
+        # PORTAINER PORTS MANAGEMENT
+        ports:
+            - "8000:8000"
+            - "9443:9443"
+
+        # NETWORK CONFIGURATION
+        networks:
+            bridge_tp:
+                ipv4_address: 172.32.0.2
+                
+        # DNS CONFIGURATION
+        dns:
+            - "172.32.0.3"
+    
+    dns:
+        container_name: ADGuard
+        image: adguard/adguardhome
+        restart: 'no'
+
+        volumes:
+            - dns_work:/opt/adguardhome/work
+            - dns_conf:/opt/adguardhome/conf
+
+        # PORTS CONFIGURATION
+        ports:
+          - "3000:3000" # ONLY DURING CONFIGURATION
+        #    - "53:53"     # DNS - ONLY IF NEEDED
+
+        privileged: true
+
+        # NETWORK CONFIGURATION
+        networks:
+            bridge_tp:
+                ipv4_address: 172.32.0.3
+    
+    mysql:
+      container_name: MySQL
+      image: mysql:8
+      restart: "no"
+
+      volumes:
+          - mysql_data:/var/lib/mysql
+          - ./mysql/provision:/docker-entrypoint-initdb.d
+
+      # ENVIRONMENT CONFIGURATION
+      environment:
+          MYSQL_ROOT_PASSWORD: /run/secrets/mysql_root_password
+          MYSQL_USER: /run/secrets/mysql_user
+          MYSQL_PASSWORD: /run/secrets/mysql_password
+          MYSQL_DATABASE: ${MYSQL_DATABASE}
+      
+      secrets:
+        - mysql_root_password
+        - mysql_user
+        - mysql_password
+
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.32.0.4
+      
+      # DNS CONFIGURATION
+      dns:
+        - "172.32.0.3"
+    
+    proxy:
+        container_name: Proxy
+        image: 'jc21/nginx-proxy-manager:latest'
+        restart: 'no'
+
+        volumes:
+            - proxy_data:/data
+            - proxy_certs:/etc/letsencrypt
+            - proxy_snippets:/config/nginx/snippets:ro
+
+        # CHECK CONTAINER HEALTH
+        healthcheck:
+            test: ["CMD", "/bin/check-health"]
+            interval: 10s
+            timeout: 3s
+
+        # PORTS CONFIGURATION
+        ports:
+            - "81:81"     # ONLY DURING CONFIGURATION
+            # HTTP CONFIGURATION
+            - target: 80
+              published: 80
+              protocol: tcp
+              mode: host
+
+            # HTTPS CONFIGURATION
+            - target: 443      
+              published: 443 
+              protocol: tcp
+              mode: host
+        
+        links:
+          - mysql
+        
+        depends_on:
+          - mysql
+
+        # CONFIGURE ENVIRONMENT FOR DATABASE
+        environment:
+            DB_MYSQL_HOST: "172.32.0.4"
+            DB_MYSQL_PORT: 3306
+            DB_MYSQL_USER: root
+            DB_MYSQL_PASSWORD: /run/secrets/mysql_root_password
+            DB_MYSQL_NAME: ${PROXY_MYSQL_DATABASE}
+        
+        secrets:
+          - mysql_root_password
+
+        # NETWORK CONFIGURATION
+        networks:
+            bridge_tp:
+                ipv4_address: 172.32.0.5
+                
+        # DNS CONFIGURATION
+        dns:
+          - "172.32.0.3"
+    
+    authelia:
+        container_name: Authelia
+        image: 'authelia/authelia'
+        restart: 'no'
+
+        volumes:
+            - authelia_config:/config
+        
+        # EXPOSE PORTS
+        expose:
+            - 9091
+
+        # CONFIGURE ENVIRONMENT FOR DATABASE
+        environment:
+            TZ: 'Europe/Paris'
+
+        # NETWORK CONFIGURATION
+        networks:
+            bridge_tp:
+                ipv4_address: 172.32.0.6
+    
+    bitwarden:
+        container_name: Bitwarden
+        image: vaultwarden/server:latest
+        restart: 'no'
+
+        volumes:
+          - bitwarden_data:/data
+
+        # PORT DEFINITION 
+        ports: 
+          - "8005:80" # WEB INTERFACE
+          - "3012:3012" # WEB SOCKETS
+
+        # DEFINE ENVIRONMENT
+        environment:
+            ADMIN_TOKEN: /run/secrets/bitwarden_admin_token
+            SIGNUPS_ALLOWED: false
+            SMTP_HOST: "ssl0.ovh.net"
+            SMTP_FROM: "Bitwarden <noreply@example.com"
+            SMTP_PORT: 587
+            SMTP_SECURITY: "starttls"
+            SMTP_USERNAME: "noreply@example.com"
+            SMTP_PASSWORD: "abcdefghij"
+            LOG_FILE: "/data/vaultwarden.log"
+        
+        secrets:
+          - mysql_root_password
+          - bitwarden_admin_token
+
+        # NETWORK CONFIGURATION
+        networks:
+            bridge_tp:
+                ipv4_address: 172.32.0.7
+                
+        # DNS CONFIGURATION
+        dns:
+            - "172.32.0.3"
+        
+    monitoror:
+      container_name: Monitoror
+      image: monitoror/monitoror
+      restart: 'no'
+
+      # PORT MANAGEMENT
+      ports:
+        - "8001:8080"
+
+      # DNS CONFIGURATION
+      dns:
+        - 172.32.0.3
+
+      # VOLUMES CONFIGURATION
+      volumes:
+        - monitoror_config:/monitoror_configs
+
+      # NETWORK CONFIGURATION
+      networks:
+        bridge_tp:
+          ipv4_address: 172.32.0.8
+
+    ghost:
+      container_name: Ghost
+      image: ghost
+      restart: 'no'
+
+      # PORT CONFIGURATION
+      ports:
+          - "8002:2368"
+      
+      links:
+        - mysql
+
+      depends_on:
+        - mysql
+      
+      # ENVIRONMENT CONFIGURATION
+      environment:
+          url: https://blog.example.com
+          database__client: mysql
+          database__connection__host: 172.32.0.4
+          database__connection__user: root
+          database__connection__password: /run/secrets/mysql_root_password
+          database__connection__database: ${GHOST_MYSQL_DATABASE}
+
+      secrets:
+          - mysql_root_password    
+      
+      # VOLUMES CONFIGURATION
+      volumes:
+          - ghost_blogs:/var/lib/ghost/content
+          - ghost_config:/var/lib/ghost
+          
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.32.0.9
+
+    homer:
+      container_name: Homer
+      build:
+        context: .
+      restart: "no"
+
+      volumes:
+        - homer_assets:/www/assets
+
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.32.0.10
+    
+    uptime:
+      container_name: UPTimeKuma
+      image: louislam/uptime-kuma:1
+      restart: 'no'
+
+      # PORTS CONFIGURATION
+      ports:
+          - '3001:3001'
+
+      # VOLUMES CONFIGURATION
+      volumes:
+          - uptime_data:/app/data
+          - /var/run/docker.sock:/var/run/docker.sock
+
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.32.0.11
+              
+      # DNS CONFIGURATION
+      dns:
+          - "172.32.0.3"
+    
+    ntfy:
+      container_name: Ntfy
+      image: binwiederhier/ntfy
+      restart: 'no'
+
+      # PORT MANAGEMENT
+      ports:
+          - "8003:80"
+
+      # VOLUMES CONFIGURATION
+      volumes:
+          - ntfy_cache:/var/cache/ntfy
+          - ntfy_config:/etc/ntfy
+          - ntfy_logs:/var/log
+
+      # COMMANDS
+      command:
+          - serve
+
+      # CONTAINER HEALTH CHECK
+      healthcheck: # optional: remember to adapt the host:port to your environment
+          test: ["CMD-SHELL", "wget -q --tries=1 http://localhost:80/v1/health -O - | grep -Eo '\"healthy\"\\s*:\\s*true' || exit 1"]
+          interval: 60s
+          timeout: 10s
+          retries: 3
+          start_period: 40s
+      
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.32.0.12
+
+      # DNS CONFIGURATION
+      dns:
+          - "172.32.0.3"
+    
+    abstruseci:
+        container_name: AbstruseCI
+        image: abstruse/abstruse-server:latest
+        restart: 'no'
+
+        volumes:
+            - abstruse_data:/abstruse
+
+        # ENVIRONMENT CONFIGURATION
+        environment:
+            ABSTRUSE_HTTP_COMPRESS: true
+            ABSTRUSE_DB_HOST: 172.32.0.4
+            ABSTRUSE_DB_PORT: 3306
+            ABSTRUSE_DB_USER: root
+            ABSTRUSE_DB_PASSWORD: /run/secrets/mysql_root_password
+            ABSTRUSE_DB_NAME: ${ABSTRUSE_MYSQL_DATABASE}
+            ABSTRUSE_AUTH_JWTSECRET: /run/secrets/abstruse_token
+
+        secrets:
+          - mysql_root_password
+          - abstruse_token
+
+        # COMMAND CONFIGURATION
+        command:
+            - "--config=/abstruse/abstruse-server.json"
+            - "--logger-level=debug"
+
+        # NETWORK CONFIGURATION
+        networks:
+            bridge_tp:
+                ipv4_address: 172.32.0.13
+
+volumes:
+  portainer_data:
+    name: portainer_data
+  dns_work:
+    name: dns_data
+  dns_conf:
+    name: dns_conf
+  mysql_data:
+    name: mysql_data
+  proxy_data:
+    name: proxy_data
+  proxy_certs:
+    name: proxy_certs
+  proxy_snippets:
+    name: proxy_snippets
+  authelia_config:
+    name: authelia_config
+  bitwarden_data:
+    name: bitwarden_data
+  monitoror_config:
+    name: monitoror_config
+  ghost_blogs:
+    name: ghost_blogs
+  ghost_config:
+    name: ghost_config
+  homer_assets:
+    name: homer_assets
+  uptime_data:
+    name: uptime_data
+  ntfy_cache:
+    name: ntfy_cache
+  ntfy_config:
+    name: ntfy_config
+  ntfy_logs:
+    name: ntfy_logs
+  abstruse_data:
+    name: abstruse_data
+
+secrets:
+  mysql_root_password:
+    file: ./secrets/mysql/mysql_root_password.txt
+  mysql_user:
+    file: ./secrets/mysql/mysql_user.txt
+  mysql_password:
+    file: ./secrets/mysql/mysql_password.txt
+  bitwarden_admin_token:
+    file: ./secrets/bitwarden/bitwarden_admin_token.txt
+  abstruse_token:
+    file: ./secrets/abstruse/abstruse_token.txt
+
+
+# NETWORK BRIDGE CREATION
+networks:
+  bridge_tp:
+    driver: bridge
+    ipam:
+        driver: default
+        config:
+           - subnet: 172.32.0.0/24

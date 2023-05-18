@@ -1,0 +1,424 @@
+version: '3.8'
+services:
+    swag:
+        container_name: Swag
+        image: lscr.io/linuxserver/swag
+        restart: "no"
+
+        cap_add:
+          - NET_ADMIN
+        
+        environment:
+          PUID: 1000
+          PGID: 1000
+          TZ: "Europe/Paris"
+          URL: "rmr-dockertp.duckdns.org"
+          SUBDOMAINS: wildcard
+          VALIDATION: duckdns
+          DUCKDNSTOKEN: /run/secrets/duckdnstoken
+
+        volumes:
+          - ./swag/config:/config
+        
+        secrets:
+          - duckdnstoken
+
+        ports:
+            - "443:443"
+            - "80:80"
+
+        # NETWORK CONFIGURATION
+        networks:
+            bridge_tp:
+                ipv4_address: 172.31.0.2
+
+    mysql:
+      container_name: MySQL
+      image: mysql:8
+      restart: "no"
+      volumes:
+          - ./mysql/data:/var/lib/mysql
+          - ./mysql/provision:/docker-entrypoint-initdb.d
+
+      # ENVIRONMENT CONFIGURATION
+      environment:
+          MYSQL_ROOT_PASSWORD: /run/secrets/mysql_root_password
+          MYSQL_USER: /run/secrets/mysql_user
+          MYSQL_PASSWORD: /run/secrets/mysql_password
+          MYSQL_DATABASE: ${MYSQL_DATABASE}
+      
+      secrets:
+        - mysql_root_password
+        - mysql_user
+        - mysql_password
+
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.31.0.3
+    
+    ldap:
+      container_name: LDAP
+      image: osixia/openldap:1.5.0
+      restart: "no"
+
+      domainname: "example.org"
+      hostname: "example.org"
+
+      volumes:
+        - ./ldap/database:/var/lib/ldap
+        - ./ldap/config:/etc/ldap/slapd.d
+
+      environment:
+        LDAP_LOG_LEVEL: "256"
+        LDAP_ORGANISATION: ${LDAP_ORGANISATION}
+        LDAP_DOMAIN: ${LDAP_DOMAIN}
+        LDAP_BASE_DN: "${LDAP_BASE_DN}"
+        LDAP_ADMIN_PASSWORD: /run/secrets/ldap_admin_password
+        LDAP_CONFIG_PASSWORD: /run/secrets/ldap_config_password
+        LDAP_READONLY_USER: "false"
+        LDAP_RFC2307BIS_SCHEMA: "false"
+        LDAP_BACKEND: "mdb"
+        LDAP_TLS: "true"
+        LDAP_TLS_CRT_FILENAME: "ldap.crt"
+        LDAP_TLS_KEY_FILENAME: "ldap.key"
+        LDAP_TLS_DH_PARAM_FILENAME: "dhparam.pem"
+        LDAP_TLS_CA_CRT_FILENAME: "ca.crt"
+        LDAP_TLS_ENFORCE: "false"
+        LDAP_TLS_CIPHER_SUITE: "SECURE256:-VERS-SSL3.0"
+        LDAP_TLS_VERIFY_CLIENT: "demand"
+        LDAP_REPLICATION: "false"
+        KEEP_EXISTING_CONFIG: "false"
+        LDAP_REMOVE_CONFIG_AFTER_SETUP: "true"
+        LDAP_SSL_HELPER_PREFIX: "ldap"
+
+      secrets:
+        - ldap_admin_password
+        - ldap_config_password
+      
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.31.0.4
+    
+    ldap-ui:
+      container_name: LDAP_Ui
+      image: osixia/phpldapadmin:latest
+      restart: "no"
+
+      environment:
+        PHPLDAPADMIN_LDAP_HOSTS: ${LDAP_URI}
+        PHPLDAPADMIN_HTTPS: false
+      
+      secrets:
+        - ldap_admin_password
+
+      depends_on:
+        - ldap
+      
+      links:
+        - ldap
+      
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.31.0.5
+
+
+    isc-dhcpd:
+      image: networkboot/dhcpd:latest
+      container_name: isc-dhcpd
+
+      restart: 'no'
+
+      volumes:
+        - ./dhcpd/config:/data
+      
+      # PORTS TO EXPOSE
+      #ports:
+      #  - "67:67"
+
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.31.0.6
+    
+    homer:
+      container_name: Homer
+      build:
+        context: .
+      restart: "no"
+
+      volumes:
+        - ./homer/assets:/www/assets
+
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.31.0.7
+    
+    bind9-dns:
+      container_name: Bind9DNS
+      image: internetsystemsconsortium/bind9:9.18
+      restart: 'no'
+
+      volumes: 
+        - ./bind9/bind:/etc/bind
+        - ./bind9/cache:/var/cache/bind
+        - ./bind9/lib:/var/lib/bind
+        - ./bind9/log:/var/log
+      
+      # PORTS TO EXPOSE
+      #ports:
+      #  - "53:53/tcp"
+      #  - "53:53/udp"
+      #  - "127.0.0.1:953:953/tcp"
+      
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.31.0.8
+    
+    squid-proxy:
+      container_name: SquidProxy
+      image: sameersbn/squid:3.5.27-2
+      restart: 'no'
+
+      volumes:
+        - ./squid/squid.conf:/etc/squid/squid.conf
+        - ./squid/cache:/var/spool/squid
+      
+      ports:
+        - "3128:3128"
+
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.31.0.9
+    
+    zabbix-server:
+      image: zabbix/zabbix-server-mysql:ubuntu-latest
+      restart: 'no'
+      container_name: 'ZabbixServer'
+
+      environment:
+        MYSQL_USER: /run/secrets/mysql_user
+        MYSQL_PASSWORD: /run/secrets/mysql_root_password
+        MYSQL_DATABASE: ${ZABBIX_DATABASE}
+        DB_SERVER_HOST: 172.31.0.3
+
+        ZBX_HISTORYSTORAGETYPES: log,text
+        ZBX_DEBUGLEVEL: 1
+        ZBX_HOUSEKEEPINGFREQUENCY: 1
+        ZBX_MAXHOUSEKEEPERDELETE: 5000
+
+      depends_on:
+        - mysql
+      
+      links:
+        - mysql
+
+      volumes:
+        - ./zabbix/alertscripts:/usr/lib/zabbix/alertscripts
+      
+      secrets:
+        - mysql_root_password
+        - mysql_user
+        - mysql_password
+      
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.31.0.10
+    
+    zabbix-web:
+      image: zabbix/zabbix-web-nginx-mysql:ubuntu-latest
+      restart: 'no'
+      container_name: ZabbixWeb
+
+      environment:
+        MYSQL_USER: /run/secrets/mysql_user
+        MYSQL_PASSWORD: /run/secrets/mysql_root_password
+        MYSQL_DATABASE: ${ZABBIX_DATABASE}
+        DB_SERVER_HOST: 172.31.0.3
+
+        ZBX_SERVER_HOST: zabbix-server
+        ZBX_POSTMAXSIZE: 64M
+        PHP_TZ: "Europe/Paris"  
+        ZBX_MAXEXECUTIONTIME: 500
+
+      depends_on:
+        - mysql
+        - zabbix-server
+      
+      links:
+        - mysql
+
+      ports:
+        - "8090:80"
+      
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.31.0.11
+    
+    zabbix-agent:
+      image: zabbix/zabbix-agent:latest
+      privileged: true
+      restart: 'no'
+      container_name: ZabbixAgent
+
+      environment:
+        - ZBX_SERVER_HOST=172.31.0.10
+      
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.31.0.12
+    
+    syslog-ng:
+      image: lscr.io/linuxserver/syslog-ng:latest
+      container_name: SyslogNG
+      restart: 'no'
+
+      environment:
+        - PUID=1000
+        - PGID=1000
+        - TZ=Etc/UTC
+
+      volumes:
+        - ./syslog-ng/config:/config
+        - ./syslog-ng/log:/var/log
+
+      ports:
+        - 514:5514/udp
+        - 601:6601/tcp
+        - 6514:6514/tcp
+
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.31.0.13
+    
+    matomo:
+      image: matomo
+      restart: 'no'
+      container_name: Matomo
+
+      volumes:
+        - ./matomo/config:/var/www/html/config:z
+        - ./matomo/logs:/var/www/html/logs:z
+        - ./matomo/app:/var/www/html
+
+      environment:
+        MATOMO_DATABASE_HOST: 172.31.0.3
+        MATOMO_DATABASE_ADAPTER: 'mysql'
+        MATOMO_DATABASE_TABLES_PREFIX: ${MATOMO_DATABASE_TABLES_PREFIX}
+        MATOMO_DATABASE_USERNAME: /run/secrets/mysql_user
+        MATOMO_DATABASE_PASSWORD: /run/secrets/mysql_root_password
+        MATOMO_DATABASE_DBNAME: ${MATOMO_DATABASE_DBNAME}
+        MATOMO_MARIADB_AUTO_UPGRADE: 1
+        MATOMO_MARIADB_INITDB_SKIP_TZINFO: 1
+
+      ports:
+        - "8080:80"
+      
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.31.0.14
+    
+    wireguard:
+      image: linuxserver/wireguard
+      container_name: Wireguard
+      restart: 'no'
+
+      cap_add:
+        - NET_ADMIN
+        - SYS_MODULE
+
+      environment:
+        PUID: 1000
+        PGID: 1000
+        TZ: Europe/Paris
+        
+      volumes:
+        - ./wireguard/config:/config
+        - /lib/modules:/lib/modules
+
+      ports:
+        - "51820:51820/udp"
+
+      sysctls:
+        - net.ipv4.conf.all.src_valid_mark=1
+      
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.31.0.15
+    
+    wireshark:
+      image: lscr.io/linuxserver/wireshark:latest
+      container_name: Wireshark
+      restart: 'no'
+
+      cap_add:
+        - NET_ADMIN
+
+      security_opt:
+        - seccomp:unconfined
+
+      environment:
+        PUID: 1000
+        PGID: 1000
+        TZ: Europe/Paris
+
+      volumes:
+        - ./wireshark/config:/config
+
+      ports:
+        - "3000:3000"
+        - "3001:3001"
+
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.31.0.16
+
+    portainer:
+      container_name: Portainer
+      image: portainer/portainer-ce
+      restart: 'no'
+
+      volumes:
+          - ./portainer/data:/data
+          - /var/run/docker.sock:/var/run/docker.sock
+
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.31.0.17
+      
+
+secrets:
+  duckdnstoken:
+    file: ./secrets/swag/duckdnstoken.txt
+  mysql_root_password:
+    file: ./secrets/mysql/mysql_root_password.txt
+  mysql_user:
+    file: ./secrets/mysql/mysql_user.txt
+  mysql_password:
+    file: ./secrets/mysql/mysql_password.txt
+  ldap_admin_password:
+    file: ./secrets/ldap/ldap_admin_password.txt
+  ldap_config_password:
+    file: ./secrets/ldap/ldap_config_password.txt
+
+# NETWORK BRIDGE CREATION
+networks:
+  bridge_tp:
+    driver: bridge
+    ipam:
+        driver: default
+        config:
+           - subnet: 172.31.0.0/24

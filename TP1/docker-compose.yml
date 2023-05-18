@@ -1,0 +1,423 @@
+version: '3.8'
+services:
+    swag:
+        container_name: Swag
+        image: lscr.io/linuxserver/swag
+        restart: "no"
+
+        cap_add:
+          - NET_ADMIN
+        
+        environment:
+          PUID: 1000
+          PGID: 1000
+          TZ: "Europe/Paris"
+          URL: "rmr-dockertp.duckdns.org"
+          SUBDOMAINS: wildcard
+          VALIDATION: duckdns
+          DUCKDNSTOKEN: /run/secrets/duckdnstoken
+
+        volumes:
+          - ./swag/config:/config
+        
+        secrets:
+          - duckdnstoken
+
+        ports:
+            - "443:443"
+            - "80:80"
+
+        # NETWORK CONFIGURATION
+        networks:
+            bridge_tp:
+                ipv4_address: 172.30.0.2
+
+    heimdall:
+      container_name: Heimdall
+      image: lscr.io/linuxserver/heimdall:latest
+      restart: "no"
+
+      environment:
+        PUID: 1000
+        PGID: 1000
+        TZ: Europe/Paris
+
+      volumes:
+        - ./heimdall/config:/config
+
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.30.0.3
+    
+    homer:
+      container_name: Homer
+      build:
+        context: .
+      restart: "no"
+
+      volumes:
+        - ./homer/assets:/www/assets
+
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.30.0.4
+    
+    mysql1:
+      container_name: MySQL1
+      image: mysql:8
+      restart: "no"
+      volumes:
+          - ./mysql/node1:/var/lib/mysql
+          - ./mysql/provision:/docker-entrypoint-initdb.d
+
+      # ENVIRONMENT CONFIGURATION
+      environment:
+          MYSQL_ROOT_PASSWORD: /run/secrets/mysql_root_password
+          MYSQL_USER: /run/secrets/mysql_user
+          MYSQL_PASSWORD: /run/secrets/mysql_password
+          MYSQL_DATABASE: ${MYSQL_DATABASE}
+      
+      secrets:
+        - mysql_root_password
+        - mysql_user
+        - mysql_password
+
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.30.0.5
+    
+    mysql2:
+      container_name: MySQL2
+      image: mysql:8
+      restart: "no"
+      volumes:
+          - ./mysql/node2:/var/lib/mysql
+          - ./mysql/provision:/docker-entrypoint-initdb.d
+
+      # ENVIRONMENT CONFIGURATION
+      environment:
+          MYSQL_ROOT_PASSWORD: /run/secrets/mysql_root_password
+          MYSQL_USER: /run/secrets/mysql_user
+          MYSQL_PASSWORD: /run/secrets/mysql_password
+          MYSQL_DATABASE: ${MYSQL_DATABASE}
+      
+      secrets:
+        - mysql_root_password
+        - mysql_user
+        - mysql_password
+
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.30.0.6
+    
+    mysql3:
+      container_name: MySQL3
+      image: mysql:8
+      restart: "no"
+      volumes:
+          - ./mysql/node3:/var/lib/mysql
+          - ./mysql/provision:/docker-entrypoint-initdb.d
+
+      # ENVIRONMENT CONFIGURATION
+      environment:
+          MYSQL_ROOT_PASSWORD: /run/secrets/mysql_root_password
+          MYSQL_USER: /run/secrets/mysql_user
+          MYSQL_PASSWORD: /run/secrets/mysql_password
+          MYSQL_DATABASE: ${MYSQL_DATABASE}
+      
+      secrets:
+        - mysql_root_password
+        - mysql_user
+        - mysql_password
+
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.30.0.7
+    
+    phpmyadmin:
+      container_name: PHPMyAdmin
+      image: phpmyadmin
+      restart: "no"
+
+      # ENVIRONMENT CONFIGURATION
+      environment:
+        PMA_ARBITRARY: 0
+        PMA_HOSTS: MySQL1,MySQL2,MySQL3
+
+      links:
+        - mysql1
+        - mysql2
+        - mysql3
+      
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.30.0.8
+    
+    ldap:
+      container_name: LDAP
+      image: osixia/openldap:1.5.0
+      restart: "no"
+
+      domainname: "example.org"
+      hostname: "example.org"
+
+      volumes:
+        - ./ldap/database:/var/lib/ldap
+        - ./ldap/config:/etc/ldap/slapd.d
+
+      environment:
+        LDAP_LOG_LEVEL: "256"
+        LDAP_ORGANISATION: ${LDAP_ORGANISATION}
+        LDAP_DOMAIN: ${LDAP_DOMAIN}
+        LDAP_BASE_DN: "${LDAP_BASE_DN}"
+        LDAP_ADMIN_PASSWORD: /run/secrets/ldap_admin_password
+        LDAP_CONFIG_PASSWORD: /run/secrets/ldap_config_password
+        LDAP_READONLY_USER: "false"
+        LDAP_RFC2307BIS_SCHEMA: "false"
+        LDAP_BACKEND: "mdb"
+        LDAP_TLS: "true"
+        LDAP_TLS_CRT_FILENAME: "ldap.crt"
+        LDAP_TLS_KEY_FILENAME: "ldap.key"
+        LDAP_TLS_DH_PARAM_FILENAME: "dhparam.pem"
+        LDAP_TLS_CA_CRT_FILENAME: "ca.crt"
+        LDAP_TLS_ENFORCE: "false"
+        LDAP_TLS_CIPHER_SUITE: "SECURE256:-VERS-SSL3.0"
+        LDAP_TLS_VERIFY_CLIENT: "demand"
+        LDAP_REPLICATION: "false"
+        KEEP_EXISTING_CONFIG: "false"
+        LDAP_REMOVE_CONFIG_AFTER_SETUP: "true"
+        LDAP_SSL_HELPER_PREFIX: "ldap"
+
+      secrets:
+        - ldap_admin_password
+        - ldap_config_password
+      
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.30.0.9
+    
+    ldap-ui:
+      container_name: LDAP_Ui
+      image: osixia/phpldapadmin:latest
+      restart: "no"
+
+      environment:
+        PHPLDAPADMIN_LDAP_HOSTS: ${LDAP_URI}
+        PHPLDAPADMIN_HTTPS: false
+      
+      secrets:
+        - ldap_admin_password
+
+      depends_on:
+        - ldap
+      
+      links:
+        - ldap
+      
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.30.0.10
+      
+    nextcloud:
+      container_name: NextCloud
+      image: nextcloud
+      restart: always
+
+      links:
+        - mysql1
+      
+      depends_on:
+        - mysql1
+
+      volumes:
+        - ./nextcloud/data:/var/www/html
+
+      environment:
+        MYSQL_PASSWORD: /run/secrets/mysql_root_password
+        MYSQL_DATABASE: ${NEXTCLOUD_MYSQL_DATABASE}
+        MYSQL_USER: ${NEXTCLOUD_MYSQL_USER}
+        MYSQL_HOST: ${NEXTCLOUD_MYSQL_HOST}
+
+      secrets:
+        - mysql_root_password
+
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.30.0.11
+    
+    gitea:
+        container_name: Gitea
+        image: gitea/gitea
+        restart: "no"
+        volumes:
+            - ./gitea/data:/data
+            - /etc/timezone:/etc/timezone:ro
+            - /etc/localtime:/etc/localtime:ro
+        
+        # DEPENDENCIES
+        depends_on:
+          - mysql1
+        
+        links:
+          - mysql1
+
+        # PORTAINER PORTS MANAGEMENT
+        ports:
+            - "3022:22"
+
+        # NETWORK CONFIGURATION
+        networks:
+            bridge_tp:
+                ipv4_address: 172.30.0.12
+
+        # ENVIRONMENT CONFIGURATION
+        environment:
+          USER_UID: 1000
+          USER_GID: 1000
+
+          GITEA__database__DB_TYPE: "mysql"
+          GITEA__database__HOST: $GITEA_MYSQL_HOST}
+          GITEA__database__NAME: ${GITEA_MYSQL_DATABASE}
+          GITEA__database__USER: ${GITEA_MYSQL_USER}
+          GITEA__database__PASSWD: /run/secrets/mysql_root_password
+        
+        secrets:
+          - mysql_root_password
+
+    spacedeck:
+      build:
+        context: ./spacedeck
+
+      container_name: SpaceDeck
+      restart: "no"
+
+      volumes:
+        - ./spacedeck/storage:/app/storage
+        - ./spacedeck/database:/app/database
+
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.30.0.13
+    
+    wordpress:
+      container_name: WordPress
+      image: wordpress:latest
+      restart: "no"
+
+      depends_on:
+        - mysql1
+      
+      links:
+        - mysql1
+      
+      volumes:
+        - ./wordpress/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini
+        - ./wordpress/html:/var/www/html
+      environment:
+        WORDPRESS_DB_HOST: ${WORDPRESS_DB_HOST}
+        WORDPRESS_DB_USER: ${WORDPRESS_DB_USER}
+        WORDPRESS_DB_PASSWORD: /run/secrets/mysql_root_password
+        WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME}
+
+      secrets:
+        - mysql_root_password
+
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.30.0.14
+    
+    plik:
+      container_name: Plik
+      image: rootgg/plik:latest
+      restart: "no"
+      
+      volumes:
+        - ./plik/plikd.cfg:/home/plik/server/plikd.cfg
+        - ./plik/data:/data
+      
+      environment:
+        VIRTUAL_HOST: ${PLIK_HOST}
+        VIRTUAL_PORT: ${PLIK_PORT}
+      
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.30.0.15
+    
+    portainer:
+        container_name: Portainer
+        image: portainer/portainer-ce
+        restart: 'no'
+
+        volumes:
+            - ./portainer/data:/data
+            - /var/run/docker.sock:/var/run/docker.sock
+
+        # NETWORK CONFIGURATION
+        networks:
+            bridge_tp:
+                ipv4_address: 172.30.0.16
+    
+    prestashop:
+      container_name: Prestashop
+      image: prestashop/prestashop:1.7-7.3-apache
+      restart: 'no'
+      
+      links:
+        - mysql1
+
+      depends_on:
+        - mysql1
+
+      volumes:
+        - ./prestashop/web:/var/www/html
+        
+      environment:
+        PS_DEV_MODE: 1
+        PS_INSTALL_AUTO: 0
+        PB_NAME: ${PS_DATABASE_NAME}
+        PB_SERVER: ${PS_DATABASE_HOST}
+        PB_USER: ${PS_DATABASE_USER}
+        PB_PASSWD: /run/secrets/mysql_root_password
+      
+      secrets:
+        - mysql_root_password
+
+      # NETWORK CONFIGURATION
+      networks:
+          bridge_tp:
+              ipv4_address: 172.30.0.17
+
+secrets:
+  duckdnstoken:
+    file: ./secrets/swag/duckdnstoken.txt
+  mysql_root_password:
+    file: ./secrets/mysql/mysql_root_password.txt
+  mysql_user:
+    file: ./secrets/mysql/mysql_user.txt
+  mysql_password:
+    file: ./secrets/mysql/mysql_password.txt
+  ldap_admin_password:
+    file: ./secrets/ldap/ldap_admin_password.txt
+  ldap_config_password:
+    file: ./secrets/ldap/ldap_config_password.txt
+
+# NETWORK BRIDGE CREATION
+networks:
+  bridge_tp:
+    driver: bridge
+    ipam:
+        driver: default
+        config:
+           - subnet: 172.30.0.0/24
